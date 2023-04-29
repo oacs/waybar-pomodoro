@@ -1,35 +1,55 @@
 use serde_json::json;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader};
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    fs::{File, OpenOptions},
+    io::{BufRead, BufReader},
+    os::unix::fs::OpenOptionsExt,
+    path::Path,
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
+};
 
 const FIFO_PATH: &str = "pomodoro_fifo";
 const STATE_PATH: &str = "pomodoro_state.json";
 
+/// Struct representing a Pomodoro timer with start and pause functionalities.
 #[derive(Clone, Debug)]
 struct Pomodoro {
-    start_time: Option<Instant>,
-    end_time: Option<Instant>,
-    total_time: u64,
-    is_running: bool,
-    elapsed_time: u64,
+    start_time: Option<Instant>,  // The time at which the Pomodoro was started
+    end_time: Option<Instant>,    // The time at which the Pomodoro will end
+    total_time: u64,              // The total time of the Pomodoro in seconds
+    is_running: bool,             // Flag to indicate if the Pomodoro is currently running
+    elapsed_time: u64,            // The elapsed time of the Pomodoro in seconds
 }
 
 impl Pomodoro {
+    /// Creates a new Pomodoro instance with default settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pomodoro = Pomodoro::new();
+    /// ```
     fn new() -> Self {
         Self {
             start_time: None,
             end_time: None,
-            total_time: 1500,
+            total_time: 1500,  // 25 minutes in seconds
             is_running: false,
             elapsed_time: 0,
         }
     }
 
+    /// Starts the Pomodoro timer. If the timer is already running, updates the end time
+    /// of the Pomodoro to maintain the same total time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut pomodoro = Pomodoro::new();
+    ///
+    /// pomodoro.start();
+    /// ```
     fn start(&mut self) {
         if !self.is_running {
             let now = Instant::now();
@@ -49,6 +69,18 @@ impl Pomodoro {
         }
     }
 
+    /// Pauses the Pomodoro timer and updates the elapsed time with the amount of time
+    /// the timer was running.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut pomodoro = Pomodoro::new();
+    ///
+    /// pomodoro.start();
+    /// // Do some work
+    /// pomodoro.pause();
+    /// ```
     fn pause(&mut self) {
         if self.is_running {
             let now = Instant::now();
@@ -57,6 +89,26 @@ impl Pomodoro {
         }
     }
 
+    /// Returns a JSON string containing the elapsed time and remaining time of the Pomodoro
+    /// timer in minutes and seconds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut pomodoro = Pomodoro::new();
+    ///
+    /// pomodoro.start();
+    /// let pomodoro_json = pomodoro.current_pomodoro();
+    /// ```
+    ///
+    /// Returns:
+    ///
+    /// ```json
+    /// {
+    ///     "elapsed_time": "00:00",
+    ///     "text": "25:00"
+    /// }
+    /// ```
     fn current_pomodoro(&self) -> String {
         if self.start_time.is_none() {
             return json!({"text": ""}).to_string();
