@@ -7,7 +7,7 @@ pub enum PomodoroEvent {
     Error,
 }
 
-pub fn send_notification(event: PomodoroEvent) {
+pub fn send_notification(event: PomodoroEvent, sound_file: &str) {
     let message = match event {
         PomodoroEvent::Pomodoro => "Time for a Pomodoro session!",
         PomodoroEvent::ShortBreak => "Take a short break.",
@@ -22,10 +22,12 @@ pub fn send_notification(event: PomodoroEvent) {
         PomodoroEvent::Error => "dialog-error",
     };
 
-    let output = Command::new("dunstify")
-        .arg("-i")
-        .arg(icon)
-        .arg(&message)
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "dunstify -i {} '{}' && aplay {}",
+            icon, message, sound_file
+        ))
         .output()
         .expect("Failed to send notification");
 

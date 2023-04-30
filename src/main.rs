@@ -36,10 +36,11 @@ struct Pomodoro {
     is_running: bool,            // Flag to indicate if the Pomodoro is currently running
     elapsed_time: u64,           // The elapsed time of the Pomodoro in seconds
     pomodoros_completed: u64,    // The number of pomodoros completed
+    sound_path: String,          // The number of pomodoros completed
 }
 
 impl Pomodoro {
-    fn new() -> Self {
+    fn new(sound_path: String) -> Self {
         Self {
             start_time: None,
             end_time: None,
@@ -47,6 +48,7 @@ impl Pomodoro {
             is_running: false,
             elapsed_time: 0,
             pomodoros_completed: 0,
+            sound_path,
         }
     }
 
@@ -105,19 +107,19 @@ impl Pomodoro {
         if elapsed_time > self.total_time {
             if self.total_time == LONG_BREAK_DURATION || self.total_time == SHORT_BREAK_DURATION {
                 if self.is_running {
-                    send_notification(PomodoroEvent::Pomodoro);
+                    send_notification(PomodoroEvent::Pomodoro, &self.sound_path);
                     self.setup_timer(POMODORO_DURATION)
                 }
             } else {
                 match break_type {
                     BreakType::Long => {
-                        send_notification(PomodoroEvent::LongBreak);
+                        send_notification(PomodoroEvent::LongBreak, &self.sound_path);
                         self.pomodoros_completed = 0;
                         self.setup_timer(LONG_BREAK_DURATION);
                     }
                     BreakType::Short => {
                         self.pomodoros_completed += 1;
-                        send_notification(PomodoroEvent::ShortBreak);
+                        send_notification(PomodoroEvent::ShortBreak, &self.sound_path);
                         self.setup_timer(SHORT_BREAK_DURATION);
                     }
                 }
@@ -146,7 +148,14 @@ impl Pomodoro {
 }
 
 fn main() {
-    let pomodoro = Arc::new(Mutex::new(Pomodoro::new()));
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: {} <sound_file>", args[0]);
+        return;
+    }
+
+    let sound_file = &args[1];
+    let pomodoro = Arc::new(Mutex::new(Pomodoro::new(sound_file.to_string())));
     let command_queue = Arc::new(Mutex::new(Vec::<String>::new()));
 
     // Load pomodoro state
