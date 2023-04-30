@@ -1,3 +1,6 @@
+mod dunstify;
+
+use dunstify::{send_notification, PomodoroEvent};
 use serde_json::json;
 use std::{
     fs::{File, OpenOptions},
@@ -9,47 +12,44 @@ use std::{
     time::{Duration, Instant},
 };
 
+const POMODORO_DURATION: u64 = 25 * 60; // 25 minutes in seconds
+const SHORT_BREAK_DURATION: u64 = 5 * 60; // 5 minutes in seconds
+const LONG_BREAK_DURATION: u64 = 30 * 60; // 30 minutes in seconds
+const POMODOROS_PER_LONG_BREAK: u64 = 4; // Number of pomodoros before a long break
+
 const FIFO_PATH: &str = "pomodoro_fifo";
 const STATE_PATH: &str = "pomodoro_state.json";
 
-/// Struct representing a Pomodoro timer with start and pause functionalities.
+/// Enum representing the type of break to take.
+#[derive(PartialEq)]
+enum BreakType {
+    Short,
+    Long,
+}
+
+/// Struct representing a Pomodoro timer with start, pause, and break functionalities.
 #[derive(Clone, Debug)]
 struct Pomodoro {
-    start_time: Option<Instant>,  // The time at which the Pomodoro was started
-    end_time: Option<Instant>,    // The time at which the Pomodoro will end
-    total_time: u64,              // The total time of the Pomodoro in seconds
-    is_running: bool,             // Flag to indicate if the Pomodoro is currently running
-    elapsed_time: u64,            // The elapsed time of the Pomodoro in seconds
+    start_time: Option<Instant>, // The time at which the Pomodoro was started
+    end_time: Option<Instant>,   // The time at which the Pomodoro will end
+    total_time: u64,             // The total time of the Pomodoro in seconds
+    is_running: bool,            // Flag to indicate if the Pomodoro is currently running
+    elapsed_time: u64,           // The elapsed time of the Pomodoro in seconds
+    pomodoros_completed: u64,    // The number of pomodoros completed
 }
 
 impl Pomodoro {
-    /// Creates a new Pomodoro instance with default settings.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let pomodoro = Pomodoro::new();
-    /// ```
     fn new() -> Self {
         Self {
             start_time: None,
             end_time: None,
-            total_time: 1500,  // 25 minutes in seconds
+            total_time: POMODORO_DURATION,
             is_running: false,
             elapsed_time: 0,
+            pomodoros_completed: 0,
         }
     }
 
-    /// Starts the Pomodoro timer. If the timer is already running, updates the end time
-    /// of the Pomodoro to maintain the same total time.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut pomodoro = Pomodoro::new();
-    ///
-    /// pomodoro.start();
-    /// ```
     fn start(&mut self) {
         if !self.is_running {
             let now = Instant::now();
@@ -69,18 +69,6 @@ impl Pomodoro {
         }
     }
 
-    /// Pauses the Pomodoro timer and updates the elapsed time with the amount of time
-    /// the timer was running.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut pomodoro = Pomodoro::new();
-    ///
-    /// pomodoro.start();
-    /// // Do some work
-    /// pomodoro.pause();
-    /// ```
     fn pause(&mut self) {
         if self.is_running {
             let now = Instant::now();
@@ -89,31 +77,16 @@ impl Pomodoro {
         }
     }
 
-    /// Returns a JSON string containing the elapsed time and remaining time of the Pomodoro
-    /// timer in minutes and seconds.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut pomodoro = Pomodoro::new();
-    ///
-    /// pomodoro.start();
-    /// let pomodoro_json = pomodoro.current_pomodoro();
-    /// ```
-    ///
-    /// Returns:
-    ///
-    /// ```json
-    /// {
-    ///     "elapsed_time": "00:00",
-    ///     "text": "25:00"
-    /// }
-    /// ```
-    fn current_pomodoro(&self) -> String {
-        if self.start_time.is_none() {
-            return json!({"text": ""}).to_string();
-        }
+    /// Starts a break with the given duration.
+    fn setup_timer(&mut self, break_duration: u64) {
+        self.total_time = break_duration;
+        self.elapsed_time = 0;
+        self.is_running = false;
+        self.start_time = None;
+        self.end_time = None;
+    }
 
+    fn current_pomodoro(&mut self) -> String {
         let elapsed_time = if self.is_running {
             self.elapsed_time
                 + Instant::now()
@@ -123,15 +96,52 @@ impl Pomodoro {
             self.elapsed_time
         };
 
-        let remaining_time = self.total_time - elapsed_time;
-        let elapsed_time_str = format!("{:02}:{:02}", elapsed_time / 60, elapsed_time % 60);
-        let remaining_time_str = format!("{:02}:{:02}", remaining_time / 60, remaining_time % 60);
+        println!("{}", self.pomodoros_completed);
+        let (total_time, break_type) = match self.pomodoros_completed {
+            POMODOROS_PER_LONG_BREAK => (LONG_BREAK_DURATION, BreakType::Long),
+            _ => (SHORT_BREAK_DURATION, BreakType::Short),
+        };
 
-        json!({
-            "elapsed_time": elapsed_time_str,
-            "text": remaining_time_str
-        })
-        .to_string()
+        if elapsed_time > self.total_time {
+            if self.total_time == LONG_BREAK_DURATION || self.total_time == SHORT_BREAK_DURATION {
+                if self.is_running {
+                    send_notification(PomodoroEvent::Pomodoro);
+                    self.setup_timer(POMODORO_DURATION)
+                }
+            } else {
+                match break_type {
+                    BreakType::Long => {
+                        send_notification(PomodoroEvent::LongBreak);
+                        self.pomodoros_completed = 0;
+                        self.setup_timer(LONG_BREAK_DURATION);
+                    }
+                    BreakType::Short => {
+                        self.pomodoros_completed += 1;
+                        send_notification(PomodoroEvent::ShortBreak);
+                        self.setup_timer(SHORT_BREAK_DURATION);
+                    }
+                }
+            }
+            let elapsed_time_str = format!("{:02}:{:02}", 0, 0);
+            let remaining_time_str =
+                format!("{:02}:{:02}", self.total_time / 60, self.total_time % 60);
+            return json!({
+                "elapsed_time": elapsed_time_str,
+                "text": remaining_time_str
+            })
+            .to_string();
+        } else {
+            let remaining_time = self.total_time - elapsed_time;
+            let elapsed_time_str = format!("{:02}:{:02}", elapsed_time / 60, elapsed_time % 60);
+            let remaining_time_str =
+                format!("{:02}:{:02}", remaining_time / 60, remaining_time % 60);
+
+            return json!({
+                "elapsed_time": elapsed_time_str,
+                "text": remaining_time_str
+            })
+            .to_string();
+        }
     }
 }
 
@@ -149,9 +159,10 @@ fn main() {
         pomodoro.end_time = state["end_time"]
             .as_u64()
             .map(|secs| Instant::now() + Duration::from_secs(secs));
-        pomodoro.total_time = state["total_time"].as_u64().unwrap_or(1500);
+        pomodoro.total_time = state["total_time"].as_u64().unwrap_or(POMODORO_DURATION);
         pomodoro.is_running = state["is_running"].as_bool().unwrap_or(false);
         pomodoro.elapsed_time = state["elapsed_time"].as_u64().unwrap_or(0);
+        pomodoro.pomodoros_completed = state["pomodoros_completed"].as_u64().unwrap_or(0);
     }
 
     if !Path::new(FIFO_PATH).exists() {
@@ -160,6 +171,7 @@ fn main() {
     }
 
     let pomodoro_clone = pomodoro.clone();
+    println!("{}", pomodoro_clone.lock().unwrap().current_pomodoro());
     let timer_thread = thread::spawn(move || loop {
         let command = read_command(FIFO_PATH);
         match command.as_str() {
@@ -206,7 +218,8 @@ fn main() {
         "end_time": pomodoro.lock().unwrap().end_time.map(|t| t.duration_since(Instant::now()).as_secs()),
         "total_time": pomodoro.lock().unwrap().total_time,
         "is_running": pomodoro.lock().unwrap().is_running,
-        "elapsed_time": pomodoro.lock().unwrap().elapsed_time
+        "elapsed_time": pomodoro.lock().unwrap().elapsed_time,
+        "pomodoros_completed": pomodoro.lock().unwrap().pomodoros_completed
     });
 
     serde_json::to_writer_pretty(state_file, &state).unwrap();
