@@ -3,9 +3,8 @@ name = "waybar-pomodoro"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+dirs = "5.0.1"
 libc = "0.2.142"
 nix = "0.26.2"
 serde_json = "1.0.96"
